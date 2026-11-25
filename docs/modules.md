@@ -16,6 +16,10 @@ The official modules in `modules/` are complete examples:
 | `modules/border` | a module with only data: a page of two capabilities, `CORE.BORDER` and `CORE.BORDER_COLOR` |
 | `modules/film-look` | a page of `CORE.TONE` and an indicator in the native Image Control position |
 
+[Light Leak](../external-modules/light-leak/README.md) is an external module
+example: a JPEG filter with a choice page and a separate strength setting.
+It is built and installed separately from the official modules.
+
 ## Prerequisites
 
 - Rust 1.92 or later, to build the `grkit` command.

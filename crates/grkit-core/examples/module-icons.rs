@@ -1,4 +1,4 @@
-//! Reproduce the Glow, Grain, Date, Framing, Crop, Guides, and Border icons and the viewfinder status icons.
+//! Reproduce the module tiles and viewfinder status icons.
 //! Run from the repository root with `cargo run -p grkit-core --example module-icons`.
 use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use anyhow::{ensure, Context, Result};
@@ -716,6 +716,264 @@ fn border_tile(bands: [usize; 4]) -> Vec<u8> {
     pixels
 }
 
+// The module icon is a frame with light leaking in at the top-left corner.
+fn light_leak_module_tile() -> Vec<u8> {
+    let mut pixels = list_tile();
+    frame(&mut pixels, [6, 10, 34, 30]);
+    for y in 11..29 {
+        let v = 1.0 - (y - 11) as f64 / 18.0;
+        let (span, peak) = (13.0 * v, v.powi(2));
+        for x in 7..33 {
+            let dx = (x - 7) as f64;
+            let falloff = (1.0 - dx / span).max(0.0).powi(2);
+            let gray = (f64::from(DIAGRAM_FILL) + 230.0 * peak * falloff).round() as u8;
+            fill_rect(&mut pixels, [x, y, x + 1, y + 1], gray);
+        }
+    }
+    pixels
+}
+
+fn light_leak_random_tile() -> Vec<u8> {
+    let mut pixels = list_tile();
+    frame(&mut pixels, [10, 10, 30, 30]);
+    let pips = [
+        (15.0, 15.0),
+        (25.0, 15.0),
+        (20.0, 20.0),
+        (15.0, 25.0),
+        (25.0, 25.0),
+    ];
+    paint(&mut pixels, [12, 12, 28, 28], 240, |x, y| {
+        pips.iter()
+            .any(|&(cx, cy)| (x - cx).powi(2) + (y - cy).powi(2) <= 4.0)
+    });
+    pixels
+}
+
+fn light_leak_slit_tile() -> Vec<u8> {
+    let mut pixels = list_tile();
+    frame(&mut pixels, [6, 10, 34, 30]);
+    for x in 7..33 {
+        let edge = ((x as f64 - 21.0) / 11.0).max(0.0);
+        let axis = 15.0 + (32 - x) as f64 / 8.0;
+        for y in 11..29 {
+            let beam = (1.0 - (y as f64 - axis).abs() / 2.2).max(0.0);
+            let gray = (f64::from(DIAGRAM_FILL) + 96.0 * edge + 125.0 * beam).round() as u8;
+            fill_rect(&mut pixels, [x, y, x + 1, y + 1], gray);
+        }
+    }
+    pixels
+}
+
+#[derive(Clone, Copy)]
+enum ReferenceLeak {
+    Burnt,
+    Band,
+    Veil,
+    Prism,
+    Fog,
+}
+
+// Draw the dominant shape of each reference field in its original position.
+fn reference_leak_tile(shape: ReferenceLeak) -> Vec<u8> {
+    let mut pixels = list_tile();
+    frame(&mut pixels, [6, 10, 34, 30]);
+    let soft = |distance: f64, radius: f64| (1.0 - (distance / radius).powi(2)).max(0.0).powi(2);
+    for y in 11..29 {
+        for x in 7..33 {
+            let u = (x as f64 - 6.5) / 26.0;
+            let v = (y as f64 - 10.5) / 18.0;
+            let light = match shape {
+                ReferenceLeak::Burnt => {
+                    let seam = 0.97 - 0.05 * (v * 16.0).sin() - 0.08 * (v - 0.5).abs();
+                    0.6 * soft(u - seam, 0.17) + 0.36 * soft(u - seam, 0.07)
+                }
+                ReferenceLeak::Band => {
+                    (0.6 + 0.36 * soft(u - 0.3, 0.4)) * soft(v - 0.79 - 0.03 * u, 0.14)
+                }
+                ReferenceLeak::Veil => {
+                    0.95 * soft(v + 0.48 * (u - 0.66), 0.53) * soft(u - 0.59, 0.55)
+                }
+                ReferenceLeak::Prism => {
+                    let curve = 0.53 + 1.75 * (v - 0.43).powi(2);
+                    soft(v - 0.43, 0.62)
+                        * (0.76 * soft(u - curve, 0.13) + 0.39 * soft(u - curve + 0.14, 0.1))
+                }
+                ReferenceLeak::Fog => {
+                    0.53 * soft(v + u * 0.8 - 0.72, 0.46) + 0.38 * soft(v + u * 0.65 - 1.25, 0.36)
+                }
+            };
+            let gray = (f64::from(DIAGRAM_FILL) + 230.0 * light).round() as u8;
+            fill_rect(&mut pixels, [x, y, x + 1, y + 1], gray);
+        }
+    }
+    pixels
+}
+
+#[derive(Clone, Copy)]
+enum LeakBadge {
+    Random,
+    Slit,
+    Reference(ReferenceLeak),
+}
+
+const LEAK_BADGE_SIZE: usize = 32;
+
+fn leak_badge_rows(inside: impl Fn(f64, f64) -> bool) -> [u32; LEAK_BADGE_SIZE] {
+    let mut rows = [0; LEAK_BADGE_SIZE];
+    // Reserve a pixel for the outline. Like the native icons, use binary ink.
+    for (y, row) in rows
+        .iter_mut()
+        .enumerate()
+        .skip(1)
+        .take(LEAK_BADGE_SIZE - 2)
+    {
+        for x in 1..LEAK_BADGE_SIZE - 1 {
+            let mut count = 0;
+            for sy in 0..SAMPLES {
+                for sx in 0..SAMPLES {
+                    count += usize::from(inside(
+                        x as f64 + (sx as f64 + 0.5) / SAMPLES as f64,
+                        y as f64 + (sy as f64 + 0.5) / SAMPLES as f64,
+                    ));
+                }
+            }
+            if count * 2 >= SAMPLES * SAMPLES {
+                *row |= 1 << x;
+            }
+        }
+    }
+    rows
+}
+
+fn leak_badge_shape(shape: LeakBadge, (x, y): Point) -> bool {
+    let frame = (4.0..28.0).contains(&x) && (2.0..19.0).contains(&y);
+    let frame_edge = frame && (!(5.6..26.4).contains(&x) || !(3.6..17.4).contains(&y));
+    match shape {
+        LeakBadge::Random => {
+            let dx = (x - 16.0).abs();
+            let dy = (y - 16.0).abs();
+            let edge = (dx - 6.8).max(0.0).hypot((dy - 6.8).max(0.0));
+            (1.6..=3.5).contains(&edge)
+                || [
+                    (0.0, 0.0),
+                    (-4.5, -4.5),
+                    (4.5, -4.5),
+                    (-4.5, 4.5),
+                    (4.5, 4.5),
+                ]
+                .iter()
+                .any(|(cx, cy)| (x - 16.0 - cx).hypot(y - 16.0 - cy) <= 1.55)
+        }
+        LeakBadge::Slit => {
+            let dx = (x - 25.0).abs();
+            let dy = (y - 7.5).abs();
+            segment_distance((x, y), (3.6, 15.7), (24.5, 7.7)) <= 0.95
+                || segment_distance((x, y), (10.1, 17.1), (19.1, 13.7)) <= 0.65
+                || (dx <= 4.7 && dy <= 0.9)
+                || (dx <= 0.9 && dy <= 4.6)
+                || dx + dy <= 2.5
+        }
+        LeakBadge::Reference(ReferenceLeak::Burnt) => {
+            let seam = [22.4, 19.0, 22.7, 20.1, 23.6, 20.8, 22.2];
+            if !frame {
+                return false;
+            }
+            let t = (y - 2.0) * 6.0 / 17.0;
+            let i = t.floor() as usize;
+            let bend = seam[i] + (seam[i + 1] - seam[i]) * t.fract();
+            frame_edge || x >= bend
+        }
+        LeakBadge::Reference(ReferenceLeak::Band) => {
+            frame_edge || (7.4..24.6).contains(&x) && (11.0..14.5).contains(&y)
+        }
+        LeakBadge::Reference(ReferenceLeak::Veil) => {
+            // A rounded bright shoulder tapering into a soft diagonal tail.
+            let t = (x - 4.5) / 23.0;
+            if !(0.0..1.0).contains(&t) {
+                return false;
+            }
+            let end = ((t - 0.76).max(0.0) / 0.24).powi(2);
+            let width = (0.8 + 4.9 * t) * (1.0 - end).sqrt();
+            let axis = 17.2 - 15.0 * t + 4.0 * t * t;
+            (y - axis).abs() <= width
+        }
+        LeakBadge::Reference(ReferenceLeak::Prism) => {
+            let dx = x - 25.5;
+            let dy = y - 10.5;
+            let r = dx.hypot(1.85 * dy);
+            dx <= -2.0 && dy.abs() < 8.5 && ((r - 16.2).abs() <= 1.2 || (r - 10.7).abs() <= 1.2)
+        }
+        LeakBadge::Reference(ReferenceLeak::Fog) => [
+            (8.0, 27.0, 5.3, 0.0),
+            (4.5, 28.1, 10.6, 0.45),
+            (6.5, 24.0, 16.1, 0.9),
+        ]
+        .into_iter()
+        .any(|(left, right, center, phase)| {
+            if !(left..right).contains(&x) {
+                return false;
+            }
+            let arch = ((x - 6.0) * 0.29 + phase).sin() * 1.38;
+            let taper = ((x - left).min(right - x) / 3.0).min(1.0);
+            (y - center - arch).abs() <= 1.13 * taper
+        }),
+    }
+}
+
+fn save_leak_badges(path: &Path) -> Result<()> {
+    use ReferenceLeak::{Band, Burnt, Fog, Prism, Veil};
+    let mut header = format!(
+        "/* Generated by the module-icons example; bit 0 is the left pixel. */\n\
+         #define BADGE_SIZE {LEAK_BADGE_SIZE}U\n\n\
+         static const u32 badge_symbols[][BADGE_SIZE] = {{\n"
+    );
+    let write_rows = |header: &mut String, rows: [u32; LEAK_BADGE_SIZE], name: &str| {
+        header.push_str(&format!("    {{ /* {name} */\n"));
+        for chunk in rows.chunks_exact(4) {
+            header.push_str("        ");
+            for bits in chunk {
+                header.push_str(&format!("0x{bits:08x}U, "));
+            }
+            header.pop();
+            header.push('\n');
+        }
+        header.push_str("    },\n");
+    };
+    // Same order as LOOK, starting at Random. Off does not paint.
+    for (name, shape) in [
+        ("Random", LeakBadge::Random),
+        ("Slit Flare", LeakBadge::Slit),
+        ("Burnt Edge", LeakBadge::Reference(Burnt)),
+        ("Film Band", LeakBadge::Reference(Band)),
+        ("Amber Veil", LeakBadge::Reference(Veil)),
+        ("Prismatic Arc", LeakBadge::Reference(Prism)),
+        ("Color Fog", LeakBadge::Reference(Fog)),
+    ] {
+        write_rows(
+            &mut header,
+            leak_badge_rows(|x, y| leak_badge_shape(shape, (x, y))),
+            name,
+        );
+    }
+    header.push_str("};\n\nstatic const u32 badge_steps[][BADGE_SIZE] = {\n");
+    for (level, name) in [(1, "Weak"), (2, "Medium"), (3, "Strong")] {
+        let wedge = wedge_from(level, 3, 3.0, 10.0);
+        let scale = SIZE as f64 / LEAK_BADGE_SIZE as f64;
+        write_rows(
+            &mut header,
+            leak_badge_rows(|x, y| wedge(x * scale, y * scale)),
+            name,
+        );
+    }
+    header.push_str("};\n");
+    if !fs::read_to_string(path).is_ok_and(|current| current == header) {
+        fs::write(path, header)?;
+        println!("Updated {}", path.display());
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let modules = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules");
     for (bloom, files) in [
@@ -843,6 +1101,23 @@ fn main() -> Result<()> {
             &border_tile(bands),
         )?;
     }
+    let light_leak = modules.join("../external-modules/light-leak");
+    let leak = light_leak.join("tiles");
+    fs::create_dir_all(&leak)?;
+    save(&leak.join("0-module.png"), &light_leak_module_tile())?;
+    save(&leak.join("8-off.png"), &artwork::off_pixels())?;
+    save(&leak.join("1-random.png"), &light_leak_random_tile())?;
+    save(&leak.join("2-slit.png"), &light_leak_slit_tile())?;
+    for (file, shape) in [
+        ("3-burnt.png", ReferenceLeak::Burnt),
+        ("4-band.png", ReferenceLeak::Band),
+        ("5-veil.png", ReferenceLeak::Veil),
+        ("6-prism.png", ReferenceLeak::Prism),
+        ("7-fog.png", ReferenceLeak::Fog),
+    ] {
+        save(&leak.join(file), &reference_leak_tile(shape))?;
+    }
+    save_leak_badges(&light_leak.join("badge_art.h"))?;
     // Viewfinder status icons (module.toml `[[indicators]]`).
     for (level, file) in [
         "vf-1-weak.png",
