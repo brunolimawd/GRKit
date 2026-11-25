@@ -1,6 +1,10 @@
 # Light Leak
 
 An optional GRKit module that simulates light entering the edge of a film camera.
+
+Current beta: **`0.1.0-beta.1`** (GRM revision `16`). See [`VERSION`](VERSION).
+The public SemVer is independent of the numeric revision required by GRKit.
+
 In **ADJ → GRK → Light Leak**, choose a style:
 
 | Reference style | Original entry | 1 · Original | 2 | 3 |
